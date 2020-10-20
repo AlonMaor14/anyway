@@ -8,6 +8,11 @@ services:
     ports:
       - "8080:5000"
     environment:
+      - TWITTER_CONSUMER_KEY
+      - TWITTER_CONSUMER_SECRET
+      - TWITTER_ACCESS_KEY
+      - TWITTER_ACCESS_SECRET
+      - GOOGLE_APPLICATION_CREDENTIALS=GOOGLE_APPLICATION_CREDENTIALS_KEY.json
       - DATABASE_URL=postgresql://anyway:anyway@db/anyway
       - FLASK_ENV=development
       - TWITTER_CONSUMER_KEY

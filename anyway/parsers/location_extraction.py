@@ -6,9 +6,10 @@ import googlemaps
 import numpy as np
 from geographiclib.geodesic import Geodesic
 
-from anyway.models import NewsFlash
+from anyway.models import NewsFlash, WazeAlert
 from anyway.parsers import resolution_dict
 from anyway import secrets
+from datetime import datetime, timedelta
 
 
 def extract_road_number(location):
@@ -297,14 +298,55 @@ def extract_location_text(text):
     return text
 
 
+def extract_waze_geo_by_street(db, geo_location, newsflash):
+    if geo_location["city"] is not None:
+        if geo_location["street"] is not None:
+            # get waze alert tops 3 hours before news flash
+            alert = (
+                db.session.query(WazeAlert)
+                .filter(
+                    WazeAlert.alert_type == "ACCIDENT",
+                    WazeAlert.street == geo_location["street"],
+                    WazeAlert.city == geo_location["city"],
+                    WazeAlert.created_at.between(
+                        newsflash.date - timedelta(hours=3), newsflash.date
+                    ),
+                )
+                .first()
+            )
+            if alert is not None:
+                return alert.latitude, alert.longitude, alert.id
+        # check only for city
+        alert = (
+            db.session.query(WazeAlert)
+            .filter(
+                WazeAlert.alert_type == "ACCIDENT",
+                WazeAlert.city == geo_location["city"],
+                WazeAlert.created_at.between(newsflash.date - timedelta(hours=3), newsflash.date),
+            )
+            .first()
+        )
+        if alert is not None:
+            return alert.latitude, alert.longitude, alert.id
+    return None
+
+
 def extract_geo_features(db, newsflash: NewsFlash) -> None:
     newsflash.location = extract_location_text(newsflash.description) or extract_location_text(
         newsflash.title
     )
     geo_location = geocode_extract(newsflash.location)
     if geo_location is not None:
-        newsflash.lat = geo_location["geom"]["lat"]
-        newsflash.lon = geo_location["geom"]["lng"]
+
+        waze_geo = extract_waze_geo_by_street(db, geo_location, newsflash)
+        if waze_geo is not None:
+            newsflash.lat = waze_geo[0]
+            newsflash.lon = waze_geo[1]
+            newsflash.waze_alert = waze_geo[2]
+        else:
+            newsflash.lat = geo_location["geom"]["lat"]
+            newsflash.lon = geo_location["geom"]["lng"]
+
         newsflash.resolution = set_accident_resolution(geo_location)
         location_from_db = get_db_matching_location(
             db,

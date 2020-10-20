@@ -4,12 +4,14 @@ import json
 import pytest
 
 from anyway.parsers import rss_sites, twitter, location_extraction
+from anyway.parsers.location_extraction import extract_waze_geo_by_street
 from anyway.parsers.news_flash_classifiers import classify_tweets, classify_rss
 from anyway import secrets
 from anyway.parsers.news_flash_db_adapter import init_db
-from anyway.models import NewsFlash
 from anyway.parsers import timezones
 from anyway.parsers.infographics_data_cache_updater import is_cache_eligible, is_in_cache
+from anyway.app_and_db import db
+from anyway.models import NewsFlash, WazeAlert
 
 
 def verify_cache(news_flash_list):
@@ -24,7 +26,7 @@ def fetch_html_walla(link):
 
 
 def fetch_html_ynet(link):
-    with open("tests/" + link[-len("0,7340,L-5735229,00.html") :], encoding="utf-8") as f:
+    with open("tests/" + link[-len("0,7340,L-5735229,00.html"):], encoding="utf-8") as f:
         return f.read()
 
 
@@ -220,16 +222,57 @@ def test_extract_location_text():
         ),
         (
                 'רוכב אופנוע בן 23 נפצע היום (שבת) באורח בינוני לאחר שהחליק בכביש ליד כפר חיטים הסמוך לטבריה. צוות מד"א העניק לו טיפול ראשוני ופינה אותו לבית החולים פוריה בטבריה.]]>'
-                ,'כביש ליד כפר חיטים הסמוך לטבריה'
+                , 'כביש ליד כפר חיטים הסמוך לטבריה'
 
         ),
         (
                 'רוכב אופנוע בן 23 החליק הלילה (שבת) בנסיעה בכביש 3 סמוך למושב בקוע, ליד בית שמש. מצבו מוגדר בינוני. צוות מד"א העניק לו טיפול רפואי ופינה אותו עם חבלה רב מערכתית לבית החולים שמיר אסף הרופא בבאר יעקב.]]>'
-                ,'כביש 3 סמוך למושב בקוע, ליד בית שמש'
+                , 'כביש 3 סמוך למושב בקוע, ליד בית שמש'
         ),
     ]:
         actual_location_text = location_extraction.extract_location_text(description)
         assert expected_location_text == actual_location_text
+
+
+def _insert_waze_alert():
+    id = db.session.query(WazeAlert).count() + 1,
+    waze_alert = WazeAlert(
+        id=id[0],
+        city='פתח תקווה',
+        confidence=2,
+        created_at=datetime.datetime.now(),
+        longitude=31.0,
+        latitude=34.0,
+        magvar=190,
+        number_thumbs_up=1,
+        report_rating=5,
+        reliability=10,
+        alert_type='ACCIDENT',
+        alert_subtype='',
+        uuid='blaaaa',
+        street='משה הס',
+        road_type=3,
+        geom='POINT(4 1)',
+    )
+    db.session.add(waze_alert)
+    db.session.commit()
+    return id
+
+
+def _delete_waze_alert(waze_alert_id):
+    db.session.query(WazeAlert).filter_by(id=waze_alert_id).delete()
+    db.session.commit()
+
+
+def test_waze_alert_extraction():
+    waze_alert_id = _insert_waze_alert()
+    geo_location = {
+        "street": "משה הס",
+        "city": 'פתח תקווה',
+    }  # (lat,lon)
+    news_flash = NewsFlash(date=datetime.datetime.now())
+    assert (34.0, 31.0, waze_alert_id[0]) == extract_waze_geo_by_street(db, geo_location, news_flash)
+    _delete_waze_alert(waze_alert_id[0])
 
 
 def test_timeparse():
